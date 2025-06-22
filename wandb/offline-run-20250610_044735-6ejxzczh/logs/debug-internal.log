@@ -1,0 +1,26 @@
+2025-06-10 04:47:35,181 INFO    StreamThr :27048 [internal.py:wandb_internal():90] W&B internal server running at pid: 27048, started at: 2025-06-10 04:47:35.180983
+2025-06-10 04:47:35,182 DEBUG   HandlerThread:27048 [handler.py:handle_request():141] handle_request: status
+2025-06-10 04:47:35,185 DEBUG   SenderThread:27048 [sender.py:send_request():316] send_request: status
+2025-06-10 04:47:35,187 INFO    WriterThread:27048 [datastore.py:open_for_write():75] open: C:\Users\yuran\OneDrive\Desktop\Mcgill\SummerResearch2025\CodeBase\FedFed\wandb\offline-run-20250610_044735-6ejxzczh\run-6ejxzczh.wandb
+2025-06-10 04:47:35,240 DEBUG   HandlerThread:27048 [handler.py:handle_request():141] handle_request: run_start
+2025-06-10 04:47:35,264 DEBUG   HandlerThread:27048 [meta.py:__init__():35] meta init
+2025-06-10 04:47:35,265 DEBUG   HandlerThread:27048 [meta.py:__init__():50] meta init done
+2025-06-10 04:47:35,265 DEBUG   HandlerThread:27048 [meta.py:probe():216] probe
+2025-06-10 04:47:35,275 DEBUG   HandlerThread:27048 [meta.py:_setup_git():206] setup git
+2025-06-10 04:47:35,370 DEBUG   HandlerThread:27048 [meta.py:_setup_git():213] setup git done
+2025-06-10 04:47:35,371 DEBUG   HandlerThread:27048 [meta.py:_save_pip():54] save pip
+2025-06-10 04:47:35,371 DEBUG   HandlerThread:27048 [meta.py:_save_pip():68] save pip done
+2025-06-10 04:47:35,372 DEBUG   HandlerThread:27048 [meta.py:_save_conda():75] save conda
+2025-06-10 04:47:35,374 ERROR   HandlerThread:27048 [meta.py:_save_conda():84] Error saving conda packages
+Traceback (most recent call last):
+  File "C:\Users\yuran\miniconda3\envs\FedFed\lib\site-packages\wandb\sdk\internal\meta.py", line 80, in _save_conda
+    subprocess.call(
+  File "C:\Users\yuran\miniconda3\envs\FedFed\lib\subprocess.py", line 349, in call
+    with Popen(*popenargs, **kwargs) as p:
+  File "C:\Users\yuran\miniconda3\envs\FedFed\lib\subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "C:\Users\yuran\miniconda3\envs\FedFed\lib\subprocess.py", line 1420, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+FileNotFoundError: [WinError 2] The system cannot find the file specified
+2025-06-10 04:47:35,376 DEBUG   HandlerThread:27048 [meta.py:_save_conda():85] save conda done
+2025-06-10 04:47:35,376 DEBUG   HandlerThread:27048 [meta.py:probe():254] probe done

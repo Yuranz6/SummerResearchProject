@@ -1,0 +1,23 @@
+2025-06-10 04:46:49,718 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Configure stats pid to 38356
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Loading settings from C:\Users\yuran\.config\wandb\settings
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Loading settings from C:\Users\yuran\OneDrive\Desktop\Mcgill\SummerResearch2025\CodeBase\FedFed\wandb\settings
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Loading settings from environment variables: {'_require_service': 'True'}
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'main.py', 'program': 'C:\\Users\\yuran\\OneDrive\\Desktop\\Mcgill\\SummerResearch2025\\CodeBase\\FedFed\\main.py'}
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_setup.py:_flush():76] Applying login settings: {'mode': 'offline'}
+2025-06-10 04:46:49,719 INFO    MainThread:38356 [wandb_init.py:_log_setup():461] Logging user logs to C:\Users\yuran\OneDrive\Desktop\Mcgill\SummerResearch2025\CodeBase\FedFed\wandb\offline-run-20250610_044649-yrpxau3v\logs\debug.log
+2025-06-10 04:46:49,720 INFO    MainThread:38356 [wandb_init.py:_log_setup():462] Logging internal logs to C:\Users\yuran\OneDrive\Desktop\Mcgill\SummerResearch2025\CodeBase\FedFed\wandb\offline-run-20250610_044649-yrpxau3v\logs\debug-internal.log
+2025-06-10 04:46:49,720 INFO    MainThread:38356 [wandb_init.py:init():495] calling init triggers
+2025-06-10 04:46:49,721 INFO    MainThread:38356 [wandb_init.py:init():498] wandb.init called with sweep_config: {}
+config: {'config_file': 'config.yaml', 'opts': []}
+2025-06-10 04:46:49,721 INFO    MainThread:38356 [wandb_init.py:init():548] starting backend
+2025-06-10 04:46:49,721 INFO    MainThread:38356 [wandb_init.py:init():552] setting up manager
+2025-06-10 04:46:49,725 INFO    MainThread:38356 [backend.py:_multiprocessing_setup():97] multiprocessing start_methods=spawn, using: spawn
+2025-06-10 04:46:49,730 INFO    MainThread:38356 [wandb_init.py:init():558] backend started and connected
+2025-06-10 04:46:49,736 INFO    MainThread:38356 [wandb_init.py:init():636] updated telemetry
+2025-06-10 04:46:49,790 INFO    MainThread:38356 [wandb_init.py:init():700] starting run threads in backend
+2025-06-10 04:46:49,995 INFO    MainThread:38356 [wandb_run.py:_console_start():1962] atexit reg
+2025-06-10 04:46:49,996 INFO    MainThread:38356 [wandb_run.py:_redirect():1820] redirect: SettingsConsole.WRAP_RAW
+2025-06-10 04:46:49,996 INFO    MainThread:38356 [wandb_run.py:_redirect():1885] Wrapping output streams.
+2025-06-10 04:46:49,996 INFO    MainThread:38356 [wandb_run.py:_redirect():1907] Redirects installed.
+2025-06-10 04:46:49,996 INFO    MainThread:38356 [wandb_init.py:init():732] run started, returning control to user process
+2025-06-10 04:46:55,711 WARNING MsgRouterThr:38356 [router.py:message_loop():76] message_loop has been closed

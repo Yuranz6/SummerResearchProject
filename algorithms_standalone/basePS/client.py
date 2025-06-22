@@ -154,7 +154,7 @@ class Client(PSTrainer):
                     parameter.requires_grad = False
             out = self.vae_model.get_classifier()(x)
 
-            loss = lam * F.cross_entropy(out, y[0]) + (1. - lam) * F.cross_entropy(out, y[1])
+            loss = lam * F.cross_entropy(out, y[0].long()) + (1. - lam) * F.cross_entropy(out, y[1].long()) # pytorch ver difference 
             loss.backward()
             optimizer.step()
 

@@ -15,6 +15,8 @@ from torchvision.datasets import (
     FashionMNIST,
     MNIST,
 )
+from .eicu.eicu_loader import load_eicu_federated_data, eICUDataset
+
 
 
 from .cifar10.datasets import CIFAR10_truncated_WO_reload
@@ -44,6 +46,7 @@ class Data_Loader(object):
         "cifar100": CIFAR100,
         "SVHN": SVHN,
         "fmnist": FashionMNIST,
+        "eicu": None
 
     }
     sub_data_obj_dict = {
@@ -51,14 +54,15 @@ class Data_Loader(object):
         "cifar100": CIFAR100_truncated_WO_reload,
         "SVHN": SVHN_truncated_WO_reload,
         "fmnist": FashionMNIST_truncated_WO_reload,
+        "eicu": eICUDataset
     }
 
-    transform_dict = {
+    transform_dict = { # image transformations
         "cifar10": data_transforms_cifar10,
         "cifar100": data_transforms_cifar100,
         "SVHN": data_transforms_SVHN,
         "fmnist": data_transforms_fmnist,
-
+        "eicu": None
     }
 
     num_classes_dict = {
@@ -66,6 +70,7 @@ class Data_Loader(object):
         "cifar100": 100,
         "SVHN": 10,
         "fmnist": 10,
+        "eicu": 2 # binary
     }
 
 
@@ -74,9 +79,10 @@ class Data_Loader(object):
         "cifar100": 32,
         "SVHN": 32,
         "fmnist": 32,
+        "eicu": None # not applicable
     }
 
-
+        
     def __init__(self, args=None, process_id=0, mode="centralized", task="centralized",
                 data_efficient_load=True, dirichlet_balance=False, dirichlet_min_p=None,
                 dataset="", datadir="./", partition_method="hetero", partition_alpha=0.5, client_number=1, batch_size=128, num_workers=4,
@@ -90,7 +96,7 @@ class Data_Loader(object):
         self.process_id = process_id
         self.mode = mode
         self.task = task
-        self.data_efficient_load = data_efficient_load 
+        self.data_efficient_load = data_efficient_load
         self.dirichlet_balance = dirichlet_balance
         self.dirichlet_min_p = dirichlet_min_p
 
@@ -198,6 +204,46 @@ class Data_Loader(object):
 
         return train_dl, test_dl
 
+    # ----------------------- EICU -----------------------
+    def load_eicu_data(self):
+        federated_data = load_eicu_federated_data(self.args)
+        
+        # Convert to the format expected by FedFed
+        self.train_data_global_num = sum(data['num_train_samples'] for data in federated_data.values())
+        self.test_data_global_num = sum(data['num_test_samples'] for data in federated_data.values())
+        
+        # Create global datasets by combining all hospitals
+        all_train_data, all_train_labels = [], []
+        all_test_data, all_test_labels = [], []
+        
+        for hospital_data in federated_data.values():
+            # Get data from datasets
+            train_dataset = hospital_data['train_dataset']
+            test_dataset = hospital_data['test_dataset']
+            
+            all_train_data.append(train_dataset.X)
+            all_train_labels.append(train_dataset.y)
+            all_test_data.append(test_dataset.X)
+            all_test_labels.append(test_dataset.y)
+        
+        global_train_X = torch.cat(all_train_data, dim=0)
+        global_train_y = torch.cat(all_train_labels, dim=0)
+        global_test_X = torch.cat(all_test_data, dim=0)
+        global_test_y = torch.cat(all_test_labels, dim=0)
+        
+        # Create global datasets
+        global_train_dataset = eICUDataset(global_train_X.numpy(), global_train_y.numpy())
+        global_test_dataset = eICUDataset(global_test_X.numpy(), global_test_y.numpy())
+        
+        self.train_data_global_dl, self.test_data_global_dl = self.get_dataloader(
+            global_train_dataset, global_test_dataset,
+            shuffle=True, drop_last=False, train_sampler=None, num_workers=self.num_workers)
+        
+        # Store federated data for client access
+        self.federated_data = federated_data
+        
+        return federated_data
+    
 
     def get_y_train_np(self, train_ds):
         if self.dataset in ["fmnist"]:
@@ -260,7 +306,9 @@ class Data_Loader(object):
 
 
 
-
+    # ------------------------------------ For EICU data -------------------------------------
+    
+    
     # centralized loading
     def load_centralized_data(self):
         self.train_ds, self.test_ds = self.load_full_data()

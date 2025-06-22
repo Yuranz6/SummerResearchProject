@@ -1,0 +1,25 @@
+{
+    "os": "Windows-10-10.0.26100-SP0",
+    "python": "3.9.7",
+    "heartbeatAt": "2025-06-10T08:47:35.274008",
+    "startedAt": "2025-06-10T08:47:35.160973",
+    "docker": null,
+    "cpu_count": 12,
+    "cuda": null,
+    "args": [
+        "--config_file",
+        "config.yaml"
+    ],
+    "state": "running",
+    "program": "C:\\Users\\yuran\\OneDrive\\Desktop\\Mcgill\\SummerResearch2025\\CodeBase\\FedFed\\main.py",
+    "codePath": "main.py",
+    "git": {
+        "remote": "https://github.com/visitworld123/FedFed",
+        "commit": "4b5b07a7f548895ec063a498f755fd66085cedcd"
+    },
+    "email": "yuranzhang6@gmail.com",
+    "root": "C:/Users/yuran/OneDrive/Desktop/Mcgill/SummerResearch2025/CodeBase/FedFed",
+    "host": "DESKTOP-R10INUS",
+    "username": "yuran",
+    "executable": "C:\\Users\\yuran\\miniconda3\\envs\\FedFed\\python.exe"
+}
