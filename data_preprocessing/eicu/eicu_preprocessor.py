@@ -454,13 +454,11 @@ class eICUPreprocessor:
                 label = 1 if status == 'Expired' else 0
                 
             elif self.prediction_task == 'ventilator':
-                # For demo, we'll simulate ventilator labels
-                # In practice, derive from treatment table
+                # TODO
                 label = 0  # Default, would need treatment data
                 
             elif self.prediction_task == 'sepsis':
-                # For demo, we'll simulate sepsis labels  
-                # In practice, derive from diagnosis table
+                # TODO
                 label = 0  # Default, would need diagnosis data
                 
             labels.append(label)

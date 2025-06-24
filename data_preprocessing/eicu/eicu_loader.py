@@ -27,7 +27,7 @@ class eICUDataset(Dataset):
         return len(self.X)
     
     def __getitem__(self, idx):
-        X, y = self.data[idx], self.targets[idx]
+        X, y = self.X[idx], self.y[idx]
         if not torch.is_tensor(X):
             X = torch.FloatTensor(X)
         
