@@ -260,8 +260,8 @@ class Client(PSTrainer):
             optimizer.zero_grad()
             out, hi, gx, mu, logvar, rx, rx_noise1, rx_noise2 = self.vae_model(x)
 
-            cross_entropy = F.cross_entropy(out[: batch_size * 2], y.repeat(2))
-            x_ce_loss = F.cross_entropy(out[batch_size * 2:], y)
+            cross_entropy = F.cross_entropy(out[: batch_size * 2], y.repeat(2)) # loss from classifier on two noisy ver xr features (PERFORMANCE SENSITIVE)
+            x_ce_loss = F.cross_entropy(out[batch_size * 2:], y) # loss based on predictions made from ORIGINAL DATA (bn_x)
             l1 = F.mse_loss(gx, x)
             l2 = cross_entropy
             l3 = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())

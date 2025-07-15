@@ -26,11 +26,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 from data_preprocessing.build import load_data
 
 
-from data_preprocessing.loader import Data_Loader
+from data_preprocessing.loader_old import Data_Loader
 from data_preprocessing.loader_shakespeare import Shakespeare_Data_Loader
 from data_preprocessing.generative_loader import Generative_Data_Loader
 
-from data_preprocessing.loader import NORMAL_DATASET_LIST
+from data_preprocessing.loader_old import NORMAL_DATASET_LIST
 from data_preprocessing.loader_shakespeare import SHAKESPEARE_DATASET_LIST
 from data_preprocessing.generative_loader import GENERATIVE_DATASET_LIST
 from data_preprocessing.FederatedEMNIST.data_loader import load_partition_data_federated_emnist

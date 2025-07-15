@@ -20,6 +20,7 @@ from model.cv.others import (ModerateCNNMNIST, ModerateCNN)
 from model.cv.resnet_v2 import ResNet18
 from utils.log_info import *
 import torchvision.transforms as transforms
+from model.tabular.models import Medical_MLP_Classifier
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -246,20 +247,26 @@ class FL_CVAE_cifar(AbstractAutoEncoder):
         bn_x = x
         x = self.encoder_former(bn_x)
         _, mu, logvar = self.encode(x)
-        hi = self.reparameterize(mu, logvar) #+ noise* torch.randn(mu.size()).cuda()
+        hi = self.reparameterize(mu, logvar) #+ noise* torch.randn(mu.size()).cuda(). this is the latent space representation
         hi_projected = self.fc21(hi)
-        xi = self.decode(hi_projected)
+        xi = self.decode(hi_projected) 
         xi = self.decoder_last(xi)
         xi = self.xi_bn(xi)
         xi = self.sigmoid(xi)
+        
+        # xi is the reconstructed ver of input x (performance-robust feature)
 
         if self.with_classifier:
             size = xi[0].shape
-            rx = x_no_normalize - xi
+            rx = x_no_normalize - xi # performance sensitive feature
             rx_noise1 = self._add_noise(torch.clone(rx),size, self.noise_mean, self.noise_std1)
             rx_noise2 = self._add_noise(torch.clone(rx), size, self.noise_mean, self.noise_std2)
-            data = torch.cat((rx_noise1, rx_noise2, bn_x), dim = 0)
-            out = self.classifier(data)
+            data = torch.cat((rx_noise1, rx_noise2, bn_x), dim = 0) # creates a new, larger batch of data, contains 3 distinct sets of features (2 noisy performance sensitive rx + original input x(batch normalized))
+            out = self.classifier(data) 
+            # structure of out tensor directly corresponds to the concatenated data tensor:
+            #   out[0: batch_size]: classifier's prediction on rx_noise1(noisy features)
+            #   out[batch_size: 2*batch_size]: classifier's prediction on rx_noise2(noisy features)
+            #   out[2*batch_size: 3*batch_size]: classifier's prediction on x (batch normalized ver of original input x)
             return out, hi, xi, mu, logvar, rx, rx_noise1, rx_noise2
         else:
             return xi
@@ -273,3 +280,240 @@ class FL_CVAE_cifar(AbstractAutoEncoder):
 
     def get_classifier(self):
         return self.classifier
+
+
+
+
+
+class FL_CVAE_Medical(AbstractAutoEncoder):
+    """
+    Medical Conditional VAE for tabular data feature distillation
+    
+    Key architectural changes:
+    - Conv2d layers -> Linear layers  
+    - BatchNorm2d -> BatchNorm1d
+    - Image-specific reshaping -> Vector operations
+    - ResNet18 classifier -> Medical_MLP_Classifier
+    
+    Preserved interface:
+    - Same __init__ parameters (args, d, z, device, with_classifier)
+    - Same forward return: (out, hi, xi, mu, logvar, rx, rx_noise1, rx_noise2)
+    - Same methods: encode, decode, reparameterize, _add_noise, etc.
+    """
+    
+    def __init__(self, args, d=128, z=32, device=None, with_classifier=True, **kwargs):
+        super(FL_CVAE_Medical, self).__init__()
+        
+        self.noise_mean = args.VAE_mean
+        self.noise_std1 = args.VAE_std1
+        self.noise_std2 = args.VAE_std1 
+        self.device = device
+        self.noise_type = args.noise_type
+        
+        self.input_dim = getattr(args, 'VAE_input_dim', 256)
+        self.hidden_dim = d  
+        self.latent_dim = z 
+        
+        # Encoder:  fully-connected (2 layers)
+        self.encoder = nn.Sequential(
+            nn.Linear(self.input_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+        )
+        
+        self.decoder = nn.Sequential(
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.ReLU(inplace=True),
+        )
+        
+        self.decoder_last = nn.Linear(self.hidden_dim, self.input_dim)
+        self.xi_bn = nn.BatchNorm1d(self.input_dim)
+        self.sigmoid = nn.Sigmoid()
+        
+       
+        self.fc11 = nn.Linear(self.hidden_dim, self.latent_dim)  # mu projection
+        self.fc12 = nn.Linear(self.hidden_dim, self.latent_dim)  # logvar projection  
+        self.fc21 = nn.Linear(self.latent_dim, self.hidden_dim)  # decode projection
+        
+        self.relu = nn.ReLU()
+        
+        self.with_classifier = with_classifier
+        if self.with_classifier:
+            
+            self.classifier = Medical_MLP_Classifier(
+                input_dim=self.input_dim,
+                num_classes=getattr(args, 'num_classes', 1),  # Binary classification for mortality
+                hidden_dims=[self.hidden_dim, self.hidden_dim // 2]
+            )
+
+    def _add_noise(self, data, size, mean, std):
+        """
+        Add differential privacy noise to features
+       
+        """
+        if self.noise_type == 'Gaussian':
+            rand = torch.normal(mean=mean, std=std, size=size).to(self.device)
+        elif self.noise_type == 'Laplace':
+            rand = torch.Tensor(np.random.laplace(loc=mean, scale=std, size=size)).to(self.device)
+        else:
+            raise ValueError(f"Unknown noise type: {self.noise_type}")
+        data += rand
+        return data
+
+    def encode(self, x):
+        """
+        Encode input to latent space
+        
+        Args:
+            x: Input tensor [batch_size, input_dim]
+        
+        Returns:
+            tuple: (h, mu, logvar) where h is hidden representation
+        """
+        h = self.encoder(x)  # [batch_size, hidden_dim]
+        mu = self.fc11(h)    # [batch_size, latent_dim]
+        logvar = self.fc12(h)  # [batch_size, latent_dim]
+        return h, mu, logvar
+
+    def reparameterize(self, mu, logvar):
+        """
+        VAE reparameterization trick
+        
+        Preserves exact implementation from original (model/FL_VAE.py line 95-101)
+        """
+        if self.training:
+            std = logvar.mul(0.5).exp_()
+            eps = std.new(std.size()).normal_()
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def decode(self, z):
+        """
+        Decode latent representation back to data space
+        
+        Args:
+            z: Latent tensor [batch_size, hidden_dim]
+        
+        Returns:
+            Decoded tensor [batch_size, hidden_dim]
+        """
+        h3 = self.decoder(z)  # [batch_size, hidden_dim]
+        return torch.tanh(h3)  # Preserve tanh activation from original
+
+    def forward(self, x):
+        """
+        Forward pass i
+        Args:
+            x: Input medical features [batch_size, input_dim]
+        
+        Returns:
+            tuple: (out, hi, xi, mu, logvar, rx, rx_noise1, rx_noise2)
+                - out: Classifier predictions on [rx_noise1, rx_noise2, x]
+                - hi: Latent representation
+                - xi: VAE reconstruction (performance-robust features)
+                - mu, logvar: VAE latent parameters
+                - rx: Performance-sensitive features (x - xi)
+                - rx_noise1, rx_noise2: DP-protected performance-sensitive features
+        """
+        x_no_normalize = x  
+        bn_x = x  
+        
+        _, mu, logvar = self.encode(bn_x)
+        
+        hi = self.reparameterize(mu, logvar)
+        
+        hi_projected = self.fc21(hi)
+        xi_decoded = self.decode(hi_projected)
+        
+        xi = self.decoder_last(xi_decoded)
+        xi = self.xi_bn(xi)
+        xi = self.sigmoid(xi)  # Reconstruction (performance-robust features)
+        
+        if self.with_classifier:
+            # z(x;θ) = x - q(x;θ)
+            rx = x_no_normalize - xi
+            
+            # Add differential privacy noise 
+            size = rx.shape  # 1D tensor shape instead of xi[0].shape
+            rx_noise1 = self._add_noise(torch.clone(rx), size, self.noise_mean, self.noise_std1)
+            rx_noise2 = self._add_noise(torch.clone(rx), size, self.noise_mean, self.noise_std2)
+            
+            # Classifier input: [rx_noise1, rx_noise2, original_x]
+            data = torch.cat((rx_noise1, rx_noise2, bn_x), dim=0)
+            out = self.classifier(data)
+            
+            return out, hi, xi, mu, logvar, rx, rx_noise1, rx_noise2
+        else:
+            return xi
+
+    def classifier_test(self, data):
+       
+        if self.with_classifier:
+            out = self.classifier(data)
+            return out
+        else:
+            raise RuntimeError('There is no Classifier')
+
+    def get_classifier(self):
+        
+        return self.classifier
+
+    def sample(self, size):
+       
+        z = torch.randn(size, self.latent_dim).to(self.device)
+        
+        # Decode to data space
+        hi_projected = self.fc21(z)
+        xi_decoded = self.decode(hi_projected)
+        xi = self.decoder_last(xi_decoded)
+        xi = self.xi_bn(xi)
+        xi = self.sigmoid(xi)
+        
+        return xi
+
+    def loss_function(self, recon_x, x, mu, logvar):
+        """
+        VAE loss function 
+        
+        Args:
+            recon_x: Reconstructed data
+            x: Original data
+            mu: Latent mean
+            logvar: Latent log variance
+        
+        Returns:
+            dict: Loss components
+        """
+        # Reconstruction loss
+        recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+        
+        # KL divergence loss
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        
+        return {
+            'loss': recon_loss + kl_loss,
+            'reconstruction_loss': recon_loss,
+            'kl_loss': kl_loss
+        }
+
+    def latest_losses(self):
+        """
+        Return latest losses 
+        """
+        return {"loss": 0.0}  # Placeholder - losses computed in training loop
