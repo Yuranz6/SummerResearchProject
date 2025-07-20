@@ -154,7 +154,7 @@ class Client(PSTrainer):
                     parameter.requires_grad = False
             out = self.vae_model.get_classifier()(x)
 
-            loss = lam * F.cross_entropy(out, y[0].long()) + (1. - lam) * F.cross_entropy(out, y[1].long()) # pytorch ver difference 
+            loss = lam * F.cross_entropy(out, y[0]) + (1. - lam) * F.cross_entropy(out, y[1])
             loss.backward()
             optimizer.step()
 
@@ -247,7 +247,7 @@ class Client(PSTrainer):
 
             batch_size = x.size(0)
 
-            if self.args.VAE_curriculum:
+            if self.args.VAE_curriculum and self.args.dataset != 'eicu':
                 if epoch < 10:
                     re = 10 * self.args.VAE_re
                 elif epoch < 20:
@@ -258,14 +258,26 @@ class Client(PSTrainer):
                 re = self.args.VAE_re
 
             optimizer.zero_grad()
+            logging.info('DEBUG: VAE is generating performance-sensitive features for n_iter: %d' % n_iter)
             out, hi, gx, mu, logvar, rx, rx_noise1, rx_noise2 = self.vae_model(x)
 
-            cross_entropy = F.cross_entropy(out[: batch_size * 2], y.repeat(2)) # loss from classifier on two noisy ver xr features (PERFORMANCE SENSITIVE)
-            x_ce_loss = F.cross_entropy(out[batch_size * 2:], y) # loss based on predictions made from ORIGINAL DATA (bn_x)
-            l1 = F.mse_loss(gx, x)
+            if self.args.dataset == 'eicu':
+                y = y.float()
+                if out.dim() > 1 and out.size(-1) == 1:
+                    out_binary = out.squeeze(-1)
+                else:
+                    out_binary = out
+                
+                cross_entropy = F.binary_cross_entropy_with_logits(out_binary[:batch_size*2], y.repeat(2))
+                x_ce_loss = F.binary_cross_entropy_with_logits(out_binary[batch_size*2:], y)
+            else:
+                # original multi-class entropy
+                cross_entropy = F.cross_entropy(out[:batch_size*2], y.repeat(2)) # classification CE loss on noisy performance sensitive features rx_noise
+                x_ce_loss = F.cross_entropy(out[batch_size*2:], y) # CE loss on original features x(bn_x)
+            l1 = F.mse_loss(gx, x) # reconstruction loss on generated features (performance-robust)
             l2 = cross_entropy
             l3 = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            l3 /= batch_size * 3 * self.args.VAE_z
+            l3 /= batch_size * 3 * self.args.VAE_z # KL
 
             if self.args.VAE_adaptive:
                 if self.local_traindata_property == 1 :
@@ -286,7 +298,7 @@ class Client(PSTrainer):
             loss_rec.update(l1.data.item(), batch_size)
             loss_ce.update(cross_entropy.data.item(), batch_size)
             loss_kl.update(l3.data.item(), batch_size)
-            top1.update(prec1.item(), batch_size)
+            top1.update(prec1.item(), batch_size) # not needed
 
             log_info('scalar', 'client {index}:loss'.format(index=self.client_index),
                      loss_avg.avg,step=n_iter,record_tool=self.args.record_tool, 
@@ -305,7 +317,15 @@ class Client(PSTrainer):
                            loss_kl.avg, top1.avg))
 
 
-    def train_vae_model(self,round):
+    def train_vae_model(self, round):
+        if self.args.dataset == 'eicu':
+            # Medical-specific VAE training
+            self._train_vae_model_medical(round)
+        else:
+            # Original image VAE training
+            self._train_vae_model_image(round)
+            
+    def _train_vae_model_image(self,round):
         train_transform = transforms.Compose([])
         aug_vae_transform_train = transforms.Compose([])
         if self.args.dataset == 'fmnist':
@@ -347,6 +367,30 @@ class Client(PSTrainer):
             self.train_whole_process(round, epoch, self.vae_optimizer, train_dataloader)
         self.vae_model.cpu()
 
+        
+    def _train_vae_model_medical(self, round):
+
+        
+        train_dataset = torch.utils.data.TensorDataset(
+            torch.FloatTensor(self.train_ori_data),
+            torch.LongTensor(self.train_ori_targets)
+        )
+        
+        trainloader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=self.args.VAE_batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+        
+        for epoch in range(self.args.VAE_local_epoch):
+            # eICU medical data is tabular, so skip augmentation steps and go directly to main training
+            self.train_whole_process(round, epoch, self.vae_optimizer, trainloader)
+            
+            # Test periodically
+            if epoch % 5 == 0:
+                self.test_local_vae(round, epoch, 'local')
+            
     def generate_data_by_vae(self):
         data = self.train_ori_data
         targets = self.train_ori_targets
@@ -437,8 +481,16 @@ class Client(PSTrainer):
 
         return epoch_data, epoch_label
 
-
-    def construct_mix_dataloader(self, share_data1, share_data2, share_y, round):
+    def construct_mix_dataloader(self, share_data_mode=1):
+        # this part maybe can be simplified?
+        if self.args.dataset == 'eicu':
+            return self._construct_mix_dataloader_medical(share_data_mode)
+        else:
+            # Original image implementation
+            return self._construct_mix_dataloader_image(share_data_mode)
+        
+        
+    def _construct_mix_dataloader_image(self, share_data1, share_data2, share_y, round):
 
         # two dataloader inclue shared data from server and local origin dataloader
         train_ori_transform = transforms.Compose([])
@@ -466,7 +518,50 @@ class Client(PSTrainer):
         self.local_train_mixed_dataloader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                                   batch_size=32, shuffle=True,
                                                                   drop_last=False)
+        return self.local_train_mixed_dataloader # PROBLEM: Repetitive, change later
+        
+    def _construct_mix_dataloader_medical(self, share_data_mode=1):
 
+        from torch.utils.data import TensorDataset, DataLoader, ConcatDataset
+        
+        # Local dataset
+        local_dataset = TensorDataset(
+            torch.FloatTensor(self.train_ori_data),
+            torch.LongTensor(self.train_ori_targets)
+        )
+        
+        # Check if  have shared data
+        if hasattr(self, 'global_share_data1') and self.global_share_data1 is not None:
+            # Sample from shared data
+            if share_data_mode == 1:
+                sampled_data, _, sampled_y = self.sample_iid_data_from_share_dataset(
+                    self.global_share_data1, self.global_share_data2, 
+                    self.global_share_y, share_data_mode=1
+                )
+            else:
+                _, sampled_data, sampled_y = self.sample_iid_data_from_share_dataset(
+                    self.global_share_data1, self.global_share_data2,
+                    self.global_share_y, share_data_mode=2
+                )
+            
+            # shared dataset
+            shared_dataset = TensorDataset(sampled_data, sampled_y.long())
+            
+            # combine
+            mixed_dataset = ConcatDataset([local_dataset, shared_dataset])
+        else:
+            # during VAE training phase, no shared dataset yet
+            mixed_dataset = local_dataset
+        
+        mixed_dataloader = DataLoader(
+            mixed_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+        
+        self.local_train_mixed_dataloader = mixed_dataloader
+        return mixed_dataloader 
 
     def get_local_share_data(self, noise_mode):  # noise_mode means get RXnoise2 or RXnoise2
         if self.local_share_data1 is not None and noise_mode == 1:
@@ -561,11 +656,3 @@ class Client(PSTrainer):
                            shared_params_for_simulation=None):
         named_params, params_indexes, local_sample_number, other_client_params = None, None, None, None
         return named_params, params_indexes, local_sample_number, other_client_params, shared_params_for_simulation
-
-
-
-
-
-
-
-

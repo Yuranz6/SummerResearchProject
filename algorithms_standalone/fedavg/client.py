@@ -72,13 +72,28 @@ class FedAVGClient(Client):
             train_kwargs['c_model_local'] = c_model_local
         # ========================SCAFFOLD=====================#
 
-        iteration_cnt = 0
-        for epoch in range(self.args.global_epochs_per_round):
-
-            self.construct_mix_dataloader(share_data1, share_data2, share_y, round_idx)
-            self.trainer.train_mix_dataloader(epoch, self.local_train_mixed_dataloader, self.device, **train_kwargs)
-            logging.info("#############train finish for {epoch}  epoch and test result on client {index} ########".format(
-                    epoch=epoch, index=self.client_index))
+        # main training logic
+        if self.args.dataset == 'eicu':
+            # Medical data uses construct_mix_dataloader
+            share_data_mode = (round_idx % 2) + 1 if round_idx is not None else 1
+            mixed_dataloader = self.construct_mix_dataloader(share_data_mode=share_data_mode)
+            
+            # Train for specified epochs
+            for epoch in range(self.args.global_epochs_per_round):
+                global_epoch = round_idx * self.args.global_epochs_per_round + epoch
+                avg_loss = self.trainer.train_mix_dataloader(
+                    global_epoch, mixed_dataloader, self.device, **train_kwargs
+                )
+        else:
+            # Original image training with separate data sources
+            train_dataloader = self.construct_mix_dataloader()
+            
+            for epoch in range(self.args.global_epochs_per_round):
+                global_epoch = round_idx * self.args.global_epochs_per_round + epoch
+                self.lr_schedule(self.local_num_iterations, self.args.warmup_epochs)
+                self.trainer.train_mix_dataloader(
+                    global_epoch, train_dataloader, self.device, **train_kwargs
+                )
 
         # ========================SCAFFOLD=====================#
         if self.args.scaffold:
@@ -133,20 +148,3 @@ class FedAVGClient(Client):
                 global_other_params,
                 shared_params_for_simulation)
         return model_params, model_indexes, local_sample_number, client_other_params, shared_params_for_simulation
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

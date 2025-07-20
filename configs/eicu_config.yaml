@@ -1,0 +1,66 @@
+dataset: "eicu"
+data_dir: "./data"
+medical_task: "death" # Options: 'death', 'ventilation', 'sepsis'
+
+# Model config
+model: "medical_mlp"
+model_output_dim: 1
+model_input_channels: 1
+num_classes: 2
+
+VAE_input_dim: 261 # need double check
+dropout_rate: 0.2
+use_batch_norm: True
+
+# FL configuration
+algorithm: "FedAvg"
+client_num_in_total: 5
+client_num_per_round: 5
+comm_round: 500
+global_epochs_per_round: 5
+partition_method: "hospital"
+partition_alpha: 0.1 # Not used for hospital partition
+
+# VAE configuration
+VAE: True
+VAE_comm_round: 10
+VAE_client_num_per_round: 10
+VAE_local_epoch: 20
+
+# VAE loss weights
+VAE_re: 1.0
+VAE_ce: 0.5
+VAE_kl: 0.01
+VAE_x_ce: 0.1
+
+# VAE architecture
+VAE_d: 128 # Hidden dimension
+VAE_z: 32 # Latent dimension
+
+# Noise parameters (DP protection)
+VAE_mean: 0.0
+VAE_std1: 0.05
+VAE_std2: 0.1
+noise_type: "Gaussian"
+
+batch_size: 64
+VAE_batch_size: 64
+lr: 0.001
+seed: 42
+
+# Medical-specific settings
+VAE_curriculum: False
+VAE_adaptive: True
+VAE_mixupdata: False # Disable mixup for tabular
+VAE_alpha: 0.0 # No mixup
+VAE_aug_batch_size: 64
+
+# Other settings
+sched: "cosine"
+warmup_epochs: 5
+record_tool: "wandb"
+wandb_record: False
+level: "INFO"
+gpu_index: 0
+instantiate_all: True
+test: True

@@ -167,7 +167,15 @@ _C.VAE_step = '+'
 _C.VAE_mixupdata = False
 _C.VAE_curriculum = True # Curriculum for reconstruction term which helps for better convergence
 
-_C.VAE_mean = 0
+_C.VAE_mean = 0.0
 
 _C.VAE_alpha = 2.0
 _C.VAE_curriculum = True
+
+# ---------------------------------------------------------------------------- #
+# Medical task settings
+# ---------------------------------------------------------------------------- #
+_C.medical_task = 'death'  # Options: 'death', 'ventilation', 'sepsis'
+_C.VAE_input_dim = 261
+_C.dropout_rate = 0.2
+_C.use_batch_norm = True

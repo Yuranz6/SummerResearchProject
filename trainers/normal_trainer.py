@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from utils.data_utils import (
     get_named_data,
@@ -183,9 +184,14 @@ class NormalTrainer(object):
             train_batch_data = self.train_local_iter.next()
         return train_batch_data
 
-
-
     def train_mix_dataloader(self, epoch, trainloader, device, **kwargs):
+        if self.args.dataset == 'eicu':
+            return self._train_mix_dataloader_medical(epoch, trainloader, device, **kwargs)
+        else:
+            # Original image training with three data sources
+            return self._train_mix_dataloader_image(epoch, trainloader, device, **kwargs)
+
+    def _train_mix_dataloader_image(self, epoch, trainloader, device, **kwargs):
         self.model.to(device)
         self.model.train()
         self.model.training =True
@@ -249,11 +255,74 @@ class NormalTrainer(object):
             log_info('scalar', '{role}_{index}_train_acc_epoch {epoch}'.format(role=self.role, index=self.index, epoch=epoch),
                      acc.avg,step=n_iter,record_tool=self.args.record_tool,
                      wandb_record=self.args.wandb_record)
+            return loss_avg.avg
+
+    def _train_mix_dataloader_medical(self, epoch, trainloader, device, **kwargs):
+        """
+        Medical-specific training implementation
+        """
+        self.model.to(device)
+        self.model.train()
+        
+        loss_avg = AverageMeter()
+        acc = AverageMeter()
+        
+        logging.info('\n=> Training Epoch #%d, LR=%.4f' % 
+                    (epoch, self.optimizer.param_groups[0]['lr']))
+        
+        for batch_idx, (features, targets) in enumerate(trainloader):
+            X, y = features.to(device), targets.to(device)
+            batch_size = X.size(0)
+            
+            self.optimizer.zero_grad()
+            
+            out = self.model(X)
+            
+
+            if out.dim() > 1 and out.size(-1) == 1:
+                out = out.squeeze(-1)
+            
+            # Binary CE
+            self.criterion = F.binary_cross_entropy_with_logits
+            loss = self.criterion(out, y.float())
+            
+            # FedProx regularization
+            if self.args.fedprox:
+                fed_prox_reg = 0.0
+                previous_model = kwargs.get("previous_model", {})
+                for name, param in self.model.named_parameters():
+                    if name in previous_model:
+                        fed_prox_reg += ((self.args.fedprox_mu / 2) * 
+                                        torch.norm((param - previous_model[name].data.to(device)))**2)
+                loss += fed_prox_reg
+            
+            loss.backward()
+            self.optimizer.step()
+            
+            # Calculate accuracy
+            with torch.no_grad():
+                probs = torch.sigmoid(out)
+                predictions = (probs > 0.5).float()
+                correct = (predictions == targets_float).float().sum()
+                accuracy = correct / batch_size * 100
+            
+            loss_avg.update(loss.data.item(), batch_size)
+            acc.update(accuracy.item(), batch_size)
+            
+            if (batch_idx + 1) % 50 == 0:
+                logging.info('| Epoch [%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f%%' %
+                            (epoch, batch_idx + 1, len(trainloader), loss_avg.avg, acc.avg))
+        return loss_avg.avg # don't need to return
 
 
-
-
+    # ========================== Test on Server ==========================#
+    
     def test_on_server_for_round(self, round, testloader, device):
+        if self.args.dataset == 'eicu':
+            return self._test_medical_auprc(round, testloader, device)
+        else:
+            return self._test_accuracy(round, testloader, device)
+    def _test_accuracy(self, round, testloader, device):
         self.model.to(device)
         self.model.eval()
 
@@ -264,7 +333,6 @@ class NormalTrainer(object):
         total_acc_avg = 0
         with torch.no_grad():
             for batch_idx, (x, y) in enumerate(testloader):
-                # distribute data to device
                 x, y = x.to(device), y.to(device).view(-1, )
                 batch_size = x.size(0)
 
@@ -291,3 +359,53 @@ class NormalTrainer(object):
                      total_loss_avg, step=round, record_tool=self.args.record_tool,
                      wandb_record=self.args.wandb_record)
             return total_acc_avg
+        
+    def _test_medical_auprc(self, round, testloader, device):
+        """
+        Medical-specific evaluation using AUPRC
+        """
+        import sklearn
+        from sklearn.metrics import average_precision_score, roc_auc_score
+        
+        self.model.to(device)
+        self.model.eval()
+        
+        all_preds = []
+        all_targets = []
+        total_loss = 0.0
+        
+        with torch.no_grad():
+            for batch_idx, (features, targets) in enumerate(testloader):
+                features, targets = features.to(device), targets.to(device)
+                
+                out = self.model(features)
+                targets_float = targets.float()
+                
+                if out.dim() > 1 and out.size(-1) == 1:
+                    out = out.squeeze(-1)
+                
+                loss = F.binary_cross_entropy_with_logits(out, targets_float)
+                total_loss += loss.item() * features.size(0)
+                
+                probs = torch.sigmoid(out)
+                
+                all_preds.extend(probs.cpu().numpy())
+                all_targets.extend(targets_float.cpu().numpy())
+        
+        all_preds = np.array(all_preds)
+        all_targets = np.array(all_targets)
+        
+        auprc = average_precision_score(all_targets, all_preds)
+        auc_roc = roc_auc_score(all_targets, all_preds)
+        
+        predictions = (all_preds > 0.5).astype(float)
+        accuracy = (predictions == all_targets).mean() * 100
+        
+        avg_loss = total_loss / len(testloader.dataset)
+        
+        logging.info('| Test Round: %d | Loss: %.4f | Accuracy: %.2f%% | AUPRC: %.4f | AUC-ROC: %.4f' %
+                    (round, avg_loss, accuracy, auprc, auc_roc))
+        
+        # Return AUPRC as primary metric
+        return auprc
+    

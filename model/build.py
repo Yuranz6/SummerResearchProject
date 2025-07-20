@@ -153,47 +153,32 @@ def _create_cv_model(args, model_name, output_dim, image_size, device, **kwargs)
     
     return model
 
+def create_vae_model(args, device):
 
-def create_vae_model(args, device, **kwargs):
-    """
-    Create VAE model for feature distillation
-    
-    This function creates the appropriate VAE model based on the dataset type.
-    For medical datasets, it creates FL_CVAE_Medical; for image datasets, it
-    creates FL_CVAE_cifar.
-    
-    Args:
-        args: Configuration arguments
-        device: Device for model placement
-        **kwargs: Additional arguments
-    
-    Returns:
-        AbstractAutoEncoder: VAE model for feature distillation
-    """
-    if getattr(args, 'dataset', '') == 'eicu':
+    if args.dataset == 'eicu':
         logging.info("Creating FL_CVAE_Medical for tabular feature distillation")
+        from model.FL_VAE import FL_CVAE_Medical
         
         vae_model = FL_CVAE_Medical(
             args=args,
-            d=getattr(args, 'VAE_d', 128),  
-            z=getattr(args, 'VAE_z', 32),   
+            d=args.VAE_d,
+            z=args.VAE_z,
             device=device,
             with_classifier=True
         )
-        
     else:
         logging.info("Creating FL_CVAE_cifar for image feature distillation")
+        from model.FL_VAE import FL_CVAE_cifar
         
         vae_model = FL_CVAE_cifar(
             args=args,
-            d=getattr(args, 'VAE_d', 128),
-            z=getattr(args, 'VAE_z', 32),
+            d=args.VAE_d,
+            z=args.VAE_z,
             device=device,
             with_classifier=True
         )
     
     return vae_model
-
 
 def get_model_info(model):
     """

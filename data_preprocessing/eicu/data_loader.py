@@ -1,5 +1,6 @@
 import logging
 import os
+from collections import defaultdict
 import numpy as np
 import pandas as pd
 import torch
@@ -48,95 +49,70 @@ def load_eicu_medical_data(datadir, args=None, resize=None, augmentation="defaul
     return medical_train_ds, medical_test_ds
 
 
+
 def partition_medical_data_by_hospital(train_dataset, client_number, min_samples_per_hospital=10):
     """
     Partition medical data by hospital for federated learning
     
-    This function implements hospital-based partitioning where each hospital
-    becomes a federated learning client. This replaces artificial partitioning
-    methods like LDA with natural institutional boundaries.
-    
-    Args:
-        train_dataset: Medical training dataset with hospital_ids
-        client_number: Number of federated learning clients to create
-        min_samples_per_hospital: Minimum samples required per hospital to be included
-    
-    Returns:
-        tuple: (client_dataidx_map, train_cls_local_counts_dict)
-            - client_dataidx_map: Dict mapping client_id to data indices
-            - train_cls_local_counts_dict: Dict mapping client_id to class distribution
+    Natural hospital-based partitioning for medical federated learning
     """
-    
-    logging.info(f"Partitioning medical data by hospital for {client_number} clients")
-    
-    if not hasattr(train_dataset, 'hospital_ids'):
-        raise ValueError("Medical dataset must have hospital_ids attribute for partitioning")
-    
     hospital_ids = train_dataset.hospital_ids
     unique_hospitals = np.unique(hospital_ids)
     
-    logging.info(f"Found {len(unique_hospitals)} unique hospitals: {unique_hospitals}")
+    logging.info(f"Found {len(unique_hospitals)} unique hospitals in dataset")
     
-    # Filter hospitals by minimum sample count
+    # Group indices by hospital
+    hospital_to_indices = defaultdict(list)
+    for idx, hospital_id in enumerate(hospital_ids):
+        hospital_to_indices[hospital_id].append(idx)
+    
+    # Filter hospitals with minimum samples
     valid_hospitals = []
-    for hospital_id in unique_hospitals:
-        hospital_mask = (hospital_ids == hospital_id)
-        hospital_sample_count = np.sum(hospital_mask)
-        
-        if hospital_sample_count >= min_samples_per_hospital:
+    for hospital_id, indices in hospital_to_indices.items():
+        if len(indices) >= min_samples_per_hospital:
             valid_hospitals.append(hospital_id)
-            logging.info(f"Hospital {hospital_id}: {hospital_sample_count} samples - INCLUDED")
         else:
-            logging.info(f"Hospital {hospital_id}: {hospital_sample_count} samples - EXCLUDED "
-                        f"(< {min_samples_per_hospital} minimum)")
+            logging.warning(f"Hospital {hospital_id} has only {len(indices)} samples, excluding from FL")
     
-    # Adjust client_number if have fewer valid hospitals
-    if len(valid_hospitals) < client_number:
-        logging.warning(f"Number of valid hospitals ({len(valid_hospitals)}) is less than "
-                       f"requested clients ({client_number}). Using {len(valid_hospitals)} clients.")
-        client_number = len(valid_hospitals)
-    
-    # Use the hospitals with the most samples if we need to select a subset
+    # If we have more hospitals than needed, select top hospitals by sample count
     if len(valid_hospitals) > client_number:
-        # Count samples per hospital and select top hospitals
-        hospital_sample_counts = {}
-        for hospital_id in valid_hospitals:
-            hospital_mask = (hospital_ids == hospital_id)
-            hospital_sample_counts[hospital_id] = np.sum(hospital_mask)
-        
-        # Sort hospitals by sample count (descending) and take top client_number
-        sorted_hospitals = sorted(hospital_sample_counts.items(), key=lambda x: x[1], reverse=True)
-        selected_hospitals = [h[0] for h in sorted_hospitals[:client_number]]
-        
-        logging.info(f"Selected top {client_number} hospitals by sample count: {selected_hospitals}")
-    else:
-        selected_hospitals = valid_hospitals
+        hospital_sizes = [(h, len(hospital_to_indices[h])) for h in valid_hospitals]
+        hospital_sizes.sort(key=lambda x: x[1], reverse=True)
+        valid_hospitals = [h for h, _ in hospital_sizes[:client_number]]
     
-    # Create client data index mapping
+    # Create client index mapping
     client_dataidx_map = {}
-    train_cls_local_counts_dict = {}
+    train_cls_counts_dict = {}
     
-    for client_idx, hospital_id in enumerate(selected_hospitals):
-        hospital_mask = (hospital_ids == hospital_id)
-        hospital_indices = np.where(hospital_mask)[0]
+    for client_idx, hospital_id in enumerate(valid_hospitals):
+        indices = np.array(hospital_to_indices[hospital_id])
+        client_dataidx_map[client_idx] = indices
         
-        client_dataidx_map[client_idx] = hospital_indices
+        # Calculate class distribution for this client
+        client_labels = train_dataset.targets[indices].numpy()
+        unique_labels, counts = np.unique(client_labels, return_counts=True)
         
-        # Calculate class distribution for this hospital
-        hospital_labels = train_dataset.targets[hospital_mask]
-        if isinstance(hospital_labels, torch.Tensor):
-            hospital_labels = hospital_labels.numpy()
+        cls_counts = [0] * 2  # Binary classification
+        for label, count in zip(unique_labels, counts):
+            cls_counts[int(label)] = count
         
-        unique_classes, class_counts = np.unique(hospital_labels, return_counts=True)
-        train_cls_local_counts_dict[client_idx] = dict(zip(unique_classes.astype(int), class_counts))
+        train_cls_counts_dict[client_idx] = cls_counts
         
-        positive_rate = np.mean(hospital_labels)
         logging.info(f"Client {client_idx} (Hospital {hospital_id}): "
-                    f"{len(hospital_indices)} samples, "
-                    f"positive_rate={positive_rate:.3f}, "
-                    f"class_distribution={train_cls_local_counts_dict[client_idx]}")
+                    f"{len(indices)} samples, class distribution: {cls_counts}")
     
-    return client_dataidx_map, train_cls_local_counts_dict
+    # If we have fewer hospitals than clients, duplicate some hospitals
+    if len(valid_hospitals) < client_number:
+        logging.warning(f"Only {len(valid_hospitals)} hospitals available, "
+                       f"but {client_number} clients requested. Duplicating hospitals.")
+        
+        for client_idx in range(len(valid_hospitals), client_number):
+            # Duplicate hospitals in round-robin fashion
+            source_idx = client_idx % len(valid_hospitals)
+            client_dataidx_map[client_idx] = client_dataidx_map[source_idx].copy()
+            train_cls_counts_dict[client_idx] = train_cls_counts_dict[source_idx].copy()
+    
+    return client_dataidx_map, train_cls_counts_dict
 
 
 def get_medical_dataloader(datadir, train_bs, test_bs, dataidxs=None, 

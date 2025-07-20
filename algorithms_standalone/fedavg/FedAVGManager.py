@@ -7,7 +7,7 @@ from utils.data_utils import (
     get_avg_num_iterations,
 )
 from algorithms_standalone.basePS.basePSmanager import BasePSManager
-from model.build import create_model
+from model.build import create_model, create_vae_model
 from trainers.build import create_trainer
 from model.FL_VAE import *
 
@@ -26,20 +26,29 @@ class FedAVGManager(BasePSManager):
                             device=self.device, **self.other_params)
         init_state_kargs = {} 
         if self.args.VAE:
-            VAE_model = FL_CVAE_cifar(args=self.args, d=self.args.VAE_d, z=self.args.VAE_z, device=self.device)
+            VAE_model = create_vae_model(self.args, self.device)
+
 
         model_trainer = create_trainer(   
-            self.args, self.device, model,train_data_global_num=self.train_data_global_num,
-            test_data_global_num=self.test_data_global_num, train_data_global_dl=self.train_data_global_dl,
-            test_data_global_dl=self.test_data_global_dl, train_data_local_num_dict=self.train_data_local_num_dict,
-            class_num=self.class_num,server_index=0, role='server',**init_state_kargs
+            self.args, self.device, model,
+            train_data_global_num=self.train_data_global_num,
+            test_data_global_num=self.test_data_global_num, 
+            train_data_global_dl=self.train_data_global_dl,
+            test_data_global_dl=self.test_data_global_dl, 
+            train_data_local_num_dict=self.train_data_local_num_dict,
+            class_num=self.class_num,
+            server_index=0, role='server',
+            **init_state_kargs
         )
 
 
-        self.aggregator = FedAVGAggregator(self.train_data_global_dl, self.test_data_global_dl, self.train_data_global_num,
-                self.test_data_global_num, self.train_data_local_num_dict, self.args.client_num_in_total, self.device,
-                self.args, model_trainer,VAE_model)
-
+        self.aggregator = FedAVGAggregator(
+            self.train_data_global_dl, self.test_data_global_dl, 
+            self.train_data_global_num, self.test_data_global_num, 
+            self.train_data_local_num_dict, self.args.client_num_in_total, self.device,
+            self.args, model_trainer, VAE_model
+            )
+        
         logging.info("############_setup_server (END)#############")
 
 
@@ -49,24 +58,29 @@ class FedAVGManager(BasePSManager):
         # for client_index in range(self.args.client_num_in_total):
         for client_index in range(self.number_instantiated_client):
             if self.args.VAE:
-                VAE_model = FL_CVAE_cifar(args=self.args, d=self.args.VAE_d, z=self.args.VAE_z, device=self.device)
+                VAE_model = create_vae_model(self.args, self.device)
 
-            model = create_model(self.args, model_name=self.args.model, output_dim=self.args.model_output_dim,
-                            device=self.device, **self.other_params)
+            model = create_model(self.args, model_name=self.args.model, 
+                                output_dim=self.args.model_output_dim,
+                                device=self.device, **self.other_params)
 
             num_iterations = get_avg_num_iterations(self.train_data_local_num_dict, self.args.batch_size)   
             model_trainer = create_trainer(self.args, self.device, model,class_num=self.class_num,
                                            other_params=self.other_params,client_index=client_index, role='client',
                                            **init_state_kargs)
 
-            client = FedAVGClient(client_index,train_ori_data=self.train_data_local_ori_dict[client_index],
-                             train_ori_targets=self.train_targets_local_ori_dict[client_index],
-                             test_dataloader=self.test_data_local_dl_dict[client_index],
-                             train_data_num=self.train_data_local_num_dict[client_index],
-                             test_data_num=self.test_data_local_num_dict[client_index],
-                             train_cls_counts_dict = self.train_cls_local_counts_dict[client_index],
-                             device=self.device, args=self.args, model_trainer=model_trainer,
-                             vae_model=VAE_model,dataset_num=self.train_data_global_num)
+            client = FedAVGClient(
+                                    client_index,
+                                    train_ori_data=self.train_data_local_ori_dict[client_index],
+                                    train_ori_targets=self.train_targets_local_ori_dict[client_index],
+                                    test_dataloader=self.test_data_local_dl_dict[client_index],
+                                    train_data_num=self.train_data_local_num_dict[client_index],
+                                    test_data_num=self.test_data_local_num_dict[client_index],
+                                    train_cls_counts_dict = self.train_cls_local_counts_dict[client_index],
+                                    device=self.device, 
+                                    args=self.args, 
+                                    model_trainer=model_trainer,
+                                    vae_model=VAE_model,dataset_num=self.train_data_global_num)
             # client.train_vae_model()
             self.client_list.append(client)
         logging.info("############setup_clients (END)#############")

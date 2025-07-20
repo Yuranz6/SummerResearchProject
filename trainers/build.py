@@ -25,14 +25,3 @@ def create_trainer(args, device, model=None, **kwargs):
     model_trainer = NormalTrainer(model, device, criterion, optimizer, lr_scheduler, args, **kwargs)
 
     return model_trainer
-
-
-
-
-
-
-
-
-
-
-
