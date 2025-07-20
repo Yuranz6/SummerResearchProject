@@ -29,6 +29,7 @@ class FedAVGManager(BasePSManager):
             VAE_model = create_vae_model(self.args, self.device)
 
 
+        num_iterations = get_avg_num_iterations(self.train_data_local_num_dict, self.args.batch_size)
         model_trainer = create_trainer(   
             self.args, self.device, model,
             train_data_global_num=self.train_data_global_num,

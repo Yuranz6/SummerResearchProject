@@ -147,8 +147,23 @@ class PSAggregator(object):
 
                 out = self.vae_model.classifier_test(x)
 
-                loss = F.cross_entropy(out, y)
-                prec1, _ = accuracy(out.data, y)
+                if self.args.dataset == 'eicu':
+                    # For eICU, use binary cross entropy with logits
+                    y = y.float()
+                    if out.dim() > 1 and out.size(-1) == 1:
+                        out = out.squeeze(-1)
+                    loss = F.binary_cross_entropy_with_logits(out, y)
+                    
+                    # Calculate binary accuracy
+                    probs = torch.sigmoid(out)
+                    preds = (probs > 0.5).float()
+                    correct = (preds == y).float().sum()
+                    prec1 = correct / batch_size * 100
+                else:
+                    # For multi-class, use cross entropy
+                    y = y.long()
+                    loss = F.cross_entropy(out, y)
+                    prec1, _ = accuracy(out.data, y)
 
                 n_iter = (round - 1) * len(self.test_dataloader) + batch_idx
                 test_acc_avg.update(prec1.data.item(), batch_size)

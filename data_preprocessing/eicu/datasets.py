@@ -6,6 +6,19 @@ from sklearn.model_selection import train_test_split
 import logging
 import os
 
+def data_transforms_eicu(resize=32, augmentation="default", dataset_type="full_dataset", image_resolution=32):
+    """
+    For tabular data, return None transforms but maintain the return structure
+    """
+    MEAN = 0.0  
+    STD = 1.0   
+    
+    train_transform = None
+    test_transform = None
+    
+    return MEAN, STD, train_transform, test_transform
+
+
 class eICU_Medical_Dataset(data.Dataset):
     """
     eICU Medical Dataset for medical tabular data
@@ -125,19 +138,3 @@ class eICU_Medical_Dataset_truncated_WO_reload(data.Dataset):
     
     def __len__(self):
         return len(self.data)
-
-
-def data_transforms_eicu(resize=None, augmentation="default", dataset_type="full_dataset", **kwargs):
-    """Data transforms for medical tabular data"""
-    # For tabular data, we don't need image transforms
-    # Return identity transforms for compatibility
-    train_transform = None
-    test_transform = None
-    
-    if dataset_type == "sub_dataset":
-        return train_transform, test_transform
-    else:
-        # For full dataset, return mean/std for potential normalization
-        MEAN = 0.0  # Will be computed from data if needed
-        STD = 1.0   # Will be computed from data if needed
-        return MEAN, STD, train_transform, test_transform

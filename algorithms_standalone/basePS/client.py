@@ -83,59 +83,63 @@ class Client(PSTrainer):
 
 
     def test_local_vae(self, round, epoch, mode):
-        # set model as testing mode
+        """
+        Modified to use AUPRC for medical data evaluation
+        """
         self.vae_model.to(self.device)
         self.vae_model.eval()
-        # all_l, all_s, all_y, all_z, all_mu, all_logvar = [], [], [], [], [], []
+        
         test_acc_avg = AverageMeter()
         test_loss_avg = AverageMeter()
-
-        every_class_acc = {i: 0 for i in range(10)}
-        total_acc_avg = 0
+        
+        if self.args.dataset == 'eicu':
+            # For medical data, track predictions for AUPRC
+            all_preds = []
+            all_targets = []
+        
         with torch.no_grad():
             for batch_idx, (x, y) in enumerate(self.test_dataloader):
-                # distribute data to device
-                x, y = x.to(self.device), y.to(self.device).view(-1, )
+                x, y = x.to(self.device), y.to(self.device)
                 batch_size = x.size(0)
-
-                _, _, gx, _, _, rx, rx_noise1, rx_noise2 = self.vae_model(x)
-
+                
+                # Get classifier predictions
                 output = self.vae_model.classifier_test(x)
-
-                loss = F.cross_entropy(output, y)
-                prec1, class_acc = accuracy(output.data, y)
-
-                n_iter = round * self.args.VAE_local_epoch + epoch * len(self.test_dataloader) + batch_idx
-                test_acc_avg.update(prec1.item(), batch_size)
+                
+                if self.args.dataset == 'eicu':
+                    # Binary classification
+                    y_float = y.float()
+                    if output.dim() > 1 and output.size(-1) == 1:
+                        output = output.squeeze(-1)
+                    
+                    loss = F.binary_cross_entropy_with_logits(output, y_float)
+                    probs = torch.sigmoid(output)
+                    
+                    # Collect for AUPRC
+                    all_preds.extend(probs.cpu().numpy())
+                    all_targets.extend(y_float.cpu().numpy())
+                    
+                    # Calculate accuracy for logging
+                    preds = (probs > 0.5).float()
+                    correct = (preds == y_float).float().sum()
+                    accuracy = correct / batch_size * 100
+                    test_acc_avg.update(accuracy.item(), batch_size)
+                else:
+                    # Original multi-class
+                    loss = F.cross_entropy(output, y)
+                    prec1, _ = accuracy(output.data, y)
+                    test_acc_avg.update(prec1.item(), batch_size)
+                
                 test_loss_avg.update(loss.data.item(), batch_size)
-
-                log_info('scalar', 'client {index}:{mode}_test_acc_avg'.format(index=self.client_index, mode=mode),
-                         test_acc_avg.avg, step=n_iter,record_tool=self.args.record_tool, 
-                        wandb_record=self.args.wandb_record)
-                log_info('scalar', 'client {index}:{mode}_test_loss_avg'.format(index=self.client_index, mode=mode),
-                         test_loss_avg.avg, step=n_iter,record_tool=self.args.record_tool, 
-                        wandb_record=self.args.wandb_record)
-
-                total_acc_avg += test_acc_avg.avg
-
-                for key in class_acc.keys():
-                    every_class_acc[key] += class_acc[key]
-            # plot progress
-
-            for key in every_class_acc.keys():
-                every_class_acc[key] = every_class_acc[key] / 10
-            logging.info("acc based on different label")
-            logging.info(every_class_acc)
-
-            total_acc_avg /= len(self.test_dataloader)
-            log_info('scalar', 'client {index}:{mode}_test_loss_avg'.format(index=self.client_index, mode=mode),
-                     total_acc_avg,step=round,record_tool=self.args.record_tool, 
-                        wandb_record=self.args.wandb_record)
-
-            logging.info("\n| Testing Epoch #%d\t\tTest Acc: %.4f Test Loss: %.4f" % (
-                epoch, test_acc_avg.avg, test_loss_avg.avg))
-            print("\n| Testing Epoch #%d\t\tTest Avg Acc: %.4f " % (
-                epoch, total_acc_avg))
+        
+        # Calculate and log metrics
+        if self.args.dataset == 'eicu':
+            from sklearn.metrics import average_precision_score
+            auprc = average_precision_score(all_targets, all_preds)
+            logging.info("| VAE Testing Round %d Epoch %d | Test Loss: %.4f | Test Acc: %.4f | AUPRC: %.4f" %
+                        (round, epoch, test_loss_avg.avg, test_acc_avg.avg, auprc))
+        else:
+            logging.info("| VAE Testing Round %d Epoch %d | Test Loss: %.4f | Test Acc: %.4f" %
+                        (round, epoch, test_loss_avg.avg, test_acc_avg.avg))
 
     def aug_classifier_train(self, round, epoch, optimizer, aug_trainloader):
         self.vae_model.train()
@@ -258,7 +262,6 @@ class Client(PSTrainer):
                 re = self.args.VAE_re
 
             optimizer.zero_grad()
-            logging.info('DEBUG: VAE is generating performance-sensitive features for n_iter: %d' % n_iter)
             out, hi, gx, mu, logvar, rx, rx_noise1, rx_noise2 = self.vae_model(x)
 
             if self.args.dataset == 'eicu':
@@ -293,12 +296,12 @@ class Client(PSTrainer):
             optimizer.step()
 
 
-            prec1, prec5, correct, pred, class_acc = accuracy(out[:batch_size].data, y[:batch_size].data, topk=(1, 5))
+            # prec1, prec5, correct, pred, class_acc = accuracy(out[:batch_size].data, y[:batch_size].data, topk=(1, 5))
             loss_avg.update(loss.data.item(), batch_size)
             loss_rec.update(l1.data.item(), batch_size)
             loss_ce.update(cross_entropy.data.item(), batch_size)
             loss_kl.update(l3.data.item(), batch_size)
-            top1.update(prec1.item(), batch_size) # not needed
+            # top1.update(prec1.item(), batch_size) # not needed
 
             log_info('scalar', 'client {index}:loss'.format(index=self.client_index),
                      loss_avg.avg,step=n_iter,record_tool=self.args.record_tool, 

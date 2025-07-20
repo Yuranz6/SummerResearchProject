@@ -39,7 +39,7 @@ class Data_Loader(object):
         "cifar100": CIFAR100,
         "SVHN": SVHN,
         "fmnist": FashionMNIST,
-        "eicu": eICU_Medical_Dataset,  # Medical dataset integration
+        "eicu": eICU_Medical_Dataset,  
     }
     
     sub_data_obj_dict = {
@@ -47,7 +47,7 @@ class Data_Loader(object):
         "cifar100": CIFAR100_truncated_WO_reload,
         "SVHN": SVHN_truncated_WO_reload,
         "fmnist": FashionMNIST_truncated_WO_reload,
-        "eicu": eICU_Medical_Dataset_truncated_WO_reload,  # Medical truncated dataset
+        "eicu": eICU_Medical_Dataset_truncated_WO_reload,  
     }
 
     transform_dict = {
@@ -55,7 +55,7 @@ class Data_Loader(object):
         "cifar100": data_transforms_cifar100,
         "SVHN": data_transforms_SVHN,
         "fmnist": data_transforms_fmnist,
-        "eicu": data_transforms_eicu,  # Medical transforms
+        "eicu": data_transforms_eicu,  
     }
 
     num_classes_dict = {
@@ -63,7 +63,7 @@ class Data_Loader(object):
         "cifar100": 100,
         "SVHN": 10,
         "fmnist": 10,
-        "eicu": 2,  # Binary classification for medical tasks
+        "eicu": 2,  
     }
 
     image_resolution_dict = {
@@ -71,7 +71,7 @@ class Data_Loader(object):
         "cifar100": 32,
         "SVHN": 32,
         "fmnist": 32,
-        "eicu": 1,  # Not applicable for tabular data
+        "eicu": 1,  
     }
 
     def __init__(self, args=None, process_id=0, mode="centralized", task="centralized",
@@ -137,9 +137,16 @@ class Data_Loader(object):
 
     def load_full_data(self):
         if self.dataset == "eicu":
-            from .eicu.data_loader import load_eicu_medical_data
-            return load_eicu_medical_data(self.datadir, self.args, 
-                                        resize=self.resize, augmentation=self.augmentation)
+            # no image transforms needed
+            MEAN, STD, train_transform, test_transform = 0.0, 1.0, None, None
+            
+            if hasattr(self.args, 'medical_task'):
+                self.full_data_obj.task = self.args.medical_task
+                
+            train_ds = self.full_data_obj(self.datadir, train=True, download=False, transform=train_transform)
+            test_ds = self.full_data_obj(self.datadir, train=False, download=False, transform=test_transform)
+            
+            return train_ds, test_ds
         else:
             return self.load_image_data()
     
@@ -171,7 +178,6 @@ class Data_Loader(object):
                 full_dataset=train_ds)
 
         if self.dataset == "eicu":
-            # For medical data, get as numpy arrays
             train_ori_data = train_ds_local.data.numpy() if isinstance(train_ds_local.data, torch.Tensor) else train_ds_local.data
             train_ori_targets = train_ds_local.targets.numpy() if isinstance(train_ds_local.targets, torch.Tensor) else train_ds_local.targets
         else:
@@ -195,16 +201,10 @@ class Data_Loader(object):
         return train_dl, test_dl
 
     def get_y_train_np(self, train_ds):
+        """Extract labels as numpy array from dataset"""
         if self.dataset == "eicu":
-            # For medical data
-            if hasattr(train_ds, 'targets'):
-                y_train = train_ds.targets
-                if isinstance(y_train, torch.Tensor):
-                    y_train_np = y_train.numpy()
-                else:
-                    y_train_np = np.array(y_train)
-            else:
-                raise ValueError("Medical dataset must have 'targets' attribute")
+            y_train = train_ds.targets
+            y_train_np = np.array(y_train)
         elif self.dataset in ["fmnist"]:
             y_train = train_ds.targets.data
             y_train_np = np.array(y_train)
@@ -214,53 +214,52 @@ class Data_Loader(object):
         else:
             y_train = train_ds.targets
             y_train_np = np.array(y_train)
-        
         return y_train_np
 
     def federated_medical_split(self):
         """hospital-based partitioning"""
         train_ds, test_ds = self.load_full_data()
         y_train_np = self.get_y_train_np(train_ds)
-
+        
         self.train_data_global_num = y_train_np.shape[0]
         self.test_data_global_num = len(test_ds)
-
-        from .eicu.data_loader import partition_medical_data_by_hospital
-        self.client_dataidx_map, self.train_cls_local_counts_dict = partition_medical_data_by_hospital(
-            train_ds, self.client_number)
-
+        
+        from .eicu.data_loader import partition_eicu_data_by_hospital
+        self.client_dataidx_map, self.train_cls_local_counts_dict = partition_eicu_data_by_hospital(
+            train_ds, self.client_number
+        )
+        
         logging.info("train_cls_local_counts_dict = " + str(self.train_cls_local_counts_dict))
-
+        
+        # global data loaders
         self.train_data_global_dl, self.test_data_global_dl = self.get_dataloader(
-                train_ds, test_ds,   
-                shuffle=True, drop_last=False, train_sampler=None, num_workers=self.num_workers)
-        logging.info("train_dl_global number = " + str(len(self.train_data_global_dl)))
-        logging.info("test_dl_global number = " + str(len(self.test_data_global_dl)))
-
-        self.train_data_local_num_dict = dict()  
+            train_ds, test_ds,
+            shuffle=True, drop_last=False, train_sampler=None, num_workers=self.num_workers
+        )
+        
+        self.train_data_local_num_dict = dict()
         self.test_data_local_num_dict = dict()
         self.train_data_local_ori_dict = dict()
         self.train_targets_local_ori_dict = dict()
         self.test_data_local_dl_dict = dict()
-
+        
+        # Create local data for each client
         for client_index in range(self.client_number):
-            train_ds_local, test_ds_local, train_ori_data, train_ori_targets, \
-            train_data_local_num, test_data_local_num = self.load_sub_data(client_index, train_ds, test_ds)
-
+            train_data_local, test_data_local, train_ori_data, train_ori_targets, train_data_local_num, test_data_local_num = self.load_sub_data(client_index, train_ds, test_ds)
+            
+            train_data_local_dl, test_data_local_dl = self.get_dataloader(
+                train_data_local, test_data_local,
+                shuffle=True, drop_last=False, train_sampler=None, num_workers=self.num_workers
+            )
+            
             self.train_data_local_num_dict[client_index] = train_data_local_num
             self.test_data_local_num_dict[client_index] = test_data_local_num
-            logging.info("client_ID = %d, local_train_sample_number = %d, local_test_sample_number = %d" % \
-                         (client_index, train_data_local_num, test_data_local_num))
-
-            train_data_local_dl, test_data_local_dl = self.get_dataloader(train_ds_local, test_ds_local,
-                                                                          shuffle=True, drop_last=False, num_workers=self.num_workers)
-            logging.info("client_index = %d, batch_num_train_local = %d, batch_num_test_local = %d" % (
-                client_index, len(train_data_local_dl), len(test_data_local_dl)))
-
             self.test_data_local_dl_dict[client_index] = test_data_local_dl
             self.train_data_local_ori_dict[client_index] = train_ori_data
             self.train_targets_local_ori_dict[client_index] = train_ori_targets
-            self.test_data_local_dl_dict[client_index] = test_data_local_dl
+        
+        return self.train_data_local_num_dict, self.train_cls_local_counts_dict
+
 
     def federated_standalone_split(self):
         """Original federated split for image datasets"""

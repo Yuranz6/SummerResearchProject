@@ -22,6 +22,7 @@ from utils.log_info import *
 import torchvision.transforms as transforms
 from model.tabular.models import Medical_MLP_Classifier
 
+from pdb import set_trace as bp
 
 def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=True)
@@ -375,6 +376,7 @@ class FL_CVAE_Medical(AbstractAutoEncoder):
     
     def encode(self, x):
         """Encode input to latent space"""
+        # bp()
         h = self.encoder(x)
         mu = self.fc11(h)
         logvar = self.fc12(h)

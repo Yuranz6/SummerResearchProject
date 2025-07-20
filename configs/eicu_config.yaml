@@ -8,7 +8,7 @@ model_output_dim: 1
 model_input_channels: 1
 num_classes: 2
 
-VAE_input_dim: 261 # need double check
+VAE_input_dim: 256 # need double check
 dropout_rate: 0.2
 use_batch_norm: True
 
@@ -23,8 +23,8 @@ partition_alpha: 0.1 # Not used for hospital partition
 
 # VAE configuration
 VAE: True
-VAE_comm_round: 10
-VAE_client_num_per_round: 10
+VAE_comm_round: 5
+VAE_client_num_per_round: 4
 VAE_local_epoch: 20
 
 # VAE loss weights
@@ -56,7 +56,7 @@ VAE_alpha: 0.0 # No mixup
 VAE_aug_batch_size: 64
 
 # Other settings
-sched: "cosine"
+sched: "no"
 warmup_epochs: 5
 record_tool: "wandb"
 wandb_record: False
